@@ -1,16 +1,16 @@
 package gen
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"unicode"
 
-	"github.com/artem328/depquery-go/internal/gen/generator"
+	"github.com/artem328/depquery-go/internal/gen/emitter"
 	"github.com/artem328/depquery-go/internal/gen/parser"
+	"github.com/artem328/depquery-go/internal/gen/plan"
+	"github.com/artem328/depquery-go/internal/gen/schema"
+	"github.com/artem328/depquery-go/internal/gen/semantic"
 )
 
 type Config struct {
@@ -31,7 +31,7 @@ func (e multiErr) Error() string {
 	return strings.Join(msgs, "\n")
 }
 
-func Generate(ctx context.Context, conf Config) error {
+func Generate(conf Config) error {
 	wd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -47,22 +47,37 @@ func Generate(ctx context.Context, conf Config) error {
 		return err
 	}
 
-	p, err := parser.FromFile(abs)
+	prs, err := parser.FromFile(abs)
 	if err != nil {
 		return fmt.Errorf("parse schema file: %w", err)
 	}
 
-	schema, errs := p.Parse()
+	s, errs := prs.Parse()
 	if len(errs) > 0 {
 		return multiErr(errs)
 	}
 
-	workers := conf.Workers
-	if workers < 1 {
-		workers = runtime.NumCPU()
+	if errs := schema.Validate(s); len(errs) > 0 {
+		return multiErr(errs)
 	}
 
-	return generator.Generate(ctx, workers, schema, pkgName(out, conf.Package), out, rel)
+	r := semantic.NewResolver(s)
+
+	m, errs := r.Build()
+	if len(errs) > 0 {
+		return multiErr(errs)
+	}
+
+	pln := plan.NewPlanner(m)
+
+	p, err := pln.Plan()
+	if err != nil {
+		return err
+	}
+
+	e := emitter.New(p)
+
+	return e.Emit(out, conf.Package, rel)
 }
 
 func schemaFilePaths(wd, dest, f string) (abs, rel string, err error) {
@@ -98,32 +113,4 @@ func outputDir(wd, d string) (string, error) {
 	}
 
 	return abs, nil
-}
-
-func pkgName(outputDir, pkg string) string {
-	if pkg != "" {
-		return pkg
-	}
-
-	return sanitizePackageName(strings.ToLower(filepath.Base(outputDir)))
-}
-
-func sanitizePackageName(input string) string {
-	var b strings.Builder
-
-	// Ensure the first character is a letter (or prefix with "pkg")
-	runes := []rune(input)
-	if len(runes) == 0 || !unicode.IsLetter(runes[0]) {
-		b.WriteString("pkg")
-	}
-
-	for _, r := range runes {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(unicode.ToLower(r))
-		} else {
-			b.WriteRune('_') // replace invalid chars with _
-		}
-	}
-
-	return b.String()
 }

@@ -1,8 +1,9 @@
 package depquery
 
 type Candidate struct {
-	ID        ID
-	ParentID  ID
+	ID       ID
+	ParentID ID
+	//Deprecated:
 	Relations uint64
 }
 
@@ -14,13 +15,10 @@ type TopologicalPlanner struct{}
 
 func (p TopologicalPlanner) Plan(candidates []Candidate) [][]Candidate {
 	childMap := make(map[ID][]Candidate)
-	idToCandidate := make(map[ID]Candidate)
 
 	var currentLevel []Candidate
 
 	for _, c := range candidates {
-		idToCandidate[c.ID] = c
-
 		if c.ParentID == 0 {
 			currentLevel = append(currentLevel, c)
 		} else {

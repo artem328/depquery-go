@@ -25,12 +25,6 @@ func (mf MaybeFetched[T]) Maybe() (T, bool) {
 
 type ID uint
 
-type Builder struct {
-	ID        ID
-	ParentID  ID
-	Relations uint64
-}
-
 type NotInStateError[T comparable] struct {
 	id   T
 	name string
@@ -38,7 +32,7 @@ type NotInStateError[T comparable] struct {
 }
 
 func NewNotInStateError[T comparable](name string, id T) NotInStateError[T] {
-	return NotInStateError[T]{id: id, name: name, msg: fmt.Sprintf(": not found %s (%v) in state", name, id)}
+	return NotInStateError[T]{id: id, name: name, msg: fmt.Sprintf(": %s (id=%v) not found in state", name, id)}
 }
 
 func (e NotInStateError[T]) Error() string {

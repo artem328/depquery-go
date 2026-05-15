@@ -1,13 +1,10 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
-	"os/signal"
 	"runtime"
-	"syscall"
 
 	"github.com/artem328/depquery-go/internal/gen"
 )
@@ -35,12 +32,8 @@ func run() int {
 	flag.IntVar(&conf.Workers, "workers", runtime.NumCPU(), "number of concurrent workers")
 	flag.Parse()
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	if err := gen.Generate(ctx, conf); err != nil {
+	if err := gen.Generate(conf); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
-
 		return 1
 	}
 
