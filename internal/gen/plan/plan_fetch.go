@@ -9,7 +9,7 @@ import (
 type EntityFetchID int
 
 func (id EntityFetchID) String() string {
-	return "plan.EntityFetchID(" + strconv.FormatInt(int64(id), 10) + ")"
+	return "plan.EntityFetchID(" + strconv.Itoa(int(id)) + ")"
 }
 
 type EntityFetch struct {
@@ -22,6 +22,21 @@ type EntityFetch struct {
 	Child                  FetchChildID
 	IsParent               bool
 	Reversed               bool
+}
+
+type NestedEntityFetchID int
+
+func (id NestedEntityFetchID) String() string {
+	return "plan.NestedEntityFetchID(" + strconv.Itoa(int(id)) + ")"
+}
+
+type NestedEntityFetch struct {
+	ID                        NestedEntityFetchID
+	Entity                    semantic.EntityID
+	Parent                    FetchParentID
+	Synthetic                 bool
+	StateContainer            StateContainerID
+	SyntheticStateContainerID SyntheticStateContainerID
 }
 
 type FetchParentID int
@@ -61,20 +76,31 @@ type FetchParentReverse struct {
 	StateContainer ReversedStateContainerID
 }
 
+type ParentFetchGetterID int
+
+func (id ParentFetchGetterID) String() string {
+	return "plan.ParentFetchGetterID(" + strconv.Itoa(int(id)) + ")"
+}
+
 type ParentFetchGetter struct {
-	FetchParent    FetchParentID
-	StateContainer StateContainerID
+	ID                      ParentFetchGetterID
+	FetchParent             FetchParentID
+	Synthetic               bool
+	StateContainer          StateContainerID
+	SyntheticStateContainer SyntheticStateContainerID
 }
 
 type FetchContextRootID int
 
 func (id FetchContextRootID) String() string {
-	return "plan.FetchContextRootID(" + strconv.FormatInt(int64(id), 10) + ")"
+	return "plan.FetchContextRootID(" + strconv.Itoa(int(id)) + ")"
 }
 
 type FetchContextRoot struct {
-	ID             FetchContextRootID
-	Entity         semantic.EntityID
-	FetchParent    FetchParentID
-	StateContainer StateContainerID
+	ID                      FetchContextRootID
+	Entity                  semantic.EntityID
+	Synthetic               bool
+	FetchParent             FetchParentID
+	StateContainer          StateContainerID
+	SyntheticStateContainer SyntheticStateContainerID
 }

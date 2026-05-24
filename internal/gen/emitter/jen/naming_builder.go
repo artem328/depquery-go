@@ -11,6 +11,7 @@ type builderNaming struct {
 	FieldID        string
 	FieldParentID  string
 	FieldRelations string
+	FieldNested    string
 	Interface      []string
 	Struct         []string
 	Constructor    []string
@@ -24,6 +25,7 @@ func (n *builderNaming) warmUp(p plan.Plan) {
 	n.FieldID = "_id"
 	n.FieldParentID = "_parentID"
 	n.FieldRelations = "_relations"
+	n.FieldNested = "_nested"
 
 	n.Interface = make([]string, len(p.Builders))
 	n.Struct = make([]string, len(p.Builders))
@@ -100,6 +102,8 @@ func resolveBuilderMethodName(p plan.Plan, m plan.BuilderMethod) string {
 		return sanitizeID(p.Model.Relations[mm.Relation].Name, sanitizeExported)
 	case plan.VariantBuilderMethod:
 		return "If" + sanitizeID(p.Model.Variants[mm.Variant].Name, sanitizeRawCapitalized)
+	case plan.NestedBuilderMethod:
+		return "In" + sanitizeID(p.Model.Nesteds[mm.Nested].Name, sanitizeRawCapitalized)
 	default:
 		panic(fmt.Errorf("unknown builder method type: %T", m))
 	}

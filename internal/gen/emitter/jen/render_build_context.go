@@ -38,7 +38,7 @@ func (r *Renderer) generateBuildContextConstructorCall() Code {
 }
 
 func (r *Renderer) generateBuildContextFieldCandidatesByIDType() Code {
-	return Map(libID).Id(r.naming.Candidate.Interface)
+	return Map(libID).Map(Uint()).Id(r.naming.Candidate.Interface)
 }
 
 func (r *Renderer) generateBuildContextMethodBase(rcv Code) Code {
@@ -61,23 +61,30 @@ func (r *Renderer) generateBuildContextNextIDMethodCall(rcv Code) Code {
 
 func (r *Renderer) renderBuildContextAddCandidateMethod(rcv Code) {
 	id := Id("id")
+	subID := Id("subID")
 	candidate := Id("c")
+	swallow := Id("_")
+	ok := Id("ok")
 
 	candidates := Add(rcv).Dot(r.naming.BuildContext.FieldCandidates)
 
 	r.f.Add(block(
 		Add(r.generateBuildContextMethodBase(rcv)).Id(r.naming.BuildContext.AddCandidateMethod).Params(
 			Add(id).Add(libID),
+			Add(subID).Uint(),
 			Add(candidate).Id(r.naming.Candidate.Interface),
 		).Block(
 			appendSlice(candidates, candidate),
-			Add(rcv).Dot(r.naming.BuildContext.FieldCandidatesByID).Index(id).Op("=").Add(candidate),
+			If(List(swallow, ok).Op(":=").Add(rcv).Dot(r.naming.BuildContext.FieldCandidatesByID).Index(id), Op("!").Add(ok)).Block(
+				Add(rcv).Dot(r.naming.BuildContext.FieldCandidatesByID).Index(id).Op("=").Make(Map(Uint()).Id(r.naming.Candidate.Interface)),
+			),
+			Add(rcv).Dot(r.naming.BuildContext.FieldCandidatesByID).Index(id).Index(subID).Op("=").Add(candidate),
 		),
 	))
 }
 
-func (r *Renderer) generateBuildContextAddCandidateMethodCall(rcv, id, candidate Code) Code {
-	return Add(rcv).Dot(r.naming.BuildContext.AddCandidateMethod).Call(id, candidate)
+func (r *Renderer) generateBuildContextAddCandidateMethodCall(rcv, id, subID, candidate Code) Code {
+	return Add(rcv).Dot(r.naming.BuildContext.AddCandidateMethod).Call(id, subID, candidate)
 }
 
 func (r *Renderer) renderBuildContextPlanMethod(rcv Code) {
@@ -101,21 +108,19 @@ func (r *Renderer) renderBuildContextPlanMethod(rcv Code) {
 
 			g.Empty()
 
-			candidates := Id("candidates")
-			g.Add(candidates).Op(":=").Add(planner).Dot("Plan").Call(inputCandidates)
+			planned := Id("planned")
+			g.Add(planned).Op(":=").Add(planner).Dot("Plan").Call(inputCandidates)
 
 			resolvers := Id("resolvers")
-			g.Add(resolvers).Op(":=").Make(Index().Index().Id(r.naming.Resolver.Type), Len(candidates))
+			g.Add(resolvers).Op(":=").Make(Index().Index().Id(r.naming.Resolver.Type), Len(planned))
 
 			j := Id("j")
 			level := Id("level")
-			g.For(List(i, level).Op(":=").Range().Add(candidates)).Block(
+			g.For(List(i, level).Op(":=").Range().Add(planned)).Block(
 				Add(resolvers).Index(i).Op("=").Make(Index().Id(r.naming.Resolver.Type), Len(level)),
-				For(List(j, candidate).Op(":=").Range().Add(level)).BlockFunc(func(g *Group) {
-					candidateById := Add(rcv).Dot(r.naming.BuildContext.FieldCandidatesByID).Index(Add(candidate).Dot("ID"))
-
-					g.Add(resolvers).Index(i).Index(j).Op("=").Add(r.generateCandidateResolverMethodCall(candidateById))
-				}),
+				For(List(j, candidate).Op(":=").Range().Add(level)).Block(
+					Add(resolvers).Index(i).Index(j).Op("=").Add(r.generateCandidateResolverMethodCall(Add(rcv).Dot(r.naming.BuildContext.FieldCandidatesByID).Index(Add(candidate).Dot("ID")).Index(Add(candidate).Dot("SubID")))),
+				),
 			)
 
 			g.Empty()

@@ -68,6 +68,8 @@ func (r *Renderer) renderBuilders() {
 
 	r.renderCandidateInterface()
 
+	r.renderCompilerDefaultConfig()
+
 	r.renderBuildContext()
 
 	r.renderBuilderImplementations()

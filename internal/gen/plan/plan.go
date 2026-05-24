@@ -5,18 +5,22 @@ import (
 )
 
 type Plan struct {
-	Model                   semantic.Model
-	Relations               []Relation
-	Builders                []Builder
-	EntityResolvers         []EntityResolver
-	StateContainers         []StateContainer
-	ReversedStateContainers []ReversedStateContainer
-	PrefetchMethods         []PrefetchMethod
-	ResolveMethods          []ResolveMethod
-	FetchParents            []FetchParent
-	ReversedFetchParents    []ReversedFetchParent
-	FetchChildren           []FetchChild
-	EntityFetches           []EntityFetch
-	FetchContextRoots       []FetchContextRoot
-	ParentFetchGetters      []ParentFetchGetter
+	Model                    semantic.Model
+	Relations                []Relation
+	Nesteds                  []Nested
+	Builders                 []Builder
+	EntityResolvers          []EntityResolver
+	NestedResolvers          []NestedResolver
+	StateContainers          []StateContainer
+	ReversedStateContainers  []ReversedStateContainer
+	SyntheticStateContainers []SyntheticStateContainer
+	PrefetchMethods          []PrefetchMethod
+	ResolveMethods           []ResolveMethod
+	FetchParents             []FetchParent
+	ReversedFetchParents     []ReversedFetchParent
+	FetchChildren            []FetchChild
+	EntityFetches            []EntityFetch
+	NestedEntityFetches      []NestedEntityFetch
+	FetchContextRoots        []FetchContextRoot
+	ParentFetchGetters       []ParentFetchGetter
 }

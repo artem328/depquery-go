@@ -8,6 +8,7 @@ type Model struct {
 	Variants  []Variant
 	Members   []Member
 	Relations []Relation
+	Nesteds   []Nested
 }
 
 type TypeID int
@@ -60,6 +61,26 @@ type MapType struct {
 
 func (MapType) isType() {}
 
+type UnderlyingTypeKind uint
+
+const (
+	_ UnderlyingTypeKind = iota
+	UnderlyingTypeUint
+	UnderlyingTypeInt
+	UnderlyingTypeUint8
+	UnderlyingTypeInt8
+	UnderlyingTypeUint16
+	UnderlyingTypeInt16
+	UnderlyingTypeUint32
+	UnderlyingTypeInt32
+	UnderlyingTypeUint64
+	UnderlyingTypeInt64
+	UnderlyingTypeFloat32
+	UnderlyingTypeFloat64
+	UnderlyingTypeString
+	UnderlyingTypeByteArray
+)
+
 type MemberID int
 
 func (id MemberID) String() string {
@@ -86,9 +107,11 @@ func (id EntityID) String() string {
 }
 
 type Entity struct {
-	Name     string
-	Type     TypeID
-	IDMember MemberID
+	Name             string
+	Synthetic        bool
+	Type             TypeID
+	IDMember         MemberID
+	IDUnderlyingType UnderlyingTypeKind
 }
 
 type VariantID int
@@ -110,6 +133,12 @@ type Relation struct {
 	Variant    Optional[VariantID]
 	To         EntityID
 	ReversedBy Optional[MemberID]
+}
+
+type Nested struct {
+	Name string
+	From EntityID
+	To   EntityID
 }
 
 type Optional[T any] struct {

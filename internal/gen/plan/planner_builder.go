@@ -2,18 +2,18 @@ package plan
 
 import "github.com/artem328/depquery-go/internal/gen/semantic"
 
-type (
-	rootBuilderEntry struct {
-		ID      BuilderID
-		Builder RootBuilder
-	}
-	variantBuilderEntry struct {
-		ID      BuilderID
-		Builder VariantBuilder
-	}
-)
-
 func (p *Planner) initBuilders() {
+	type (
+		rootBuilderEntry struct {
+			ID      BuilderID
+			Builder RootBuilder
+		}
+		variantBuilderEntry struct {
+			ID      BuilderID
+			Builder VariantBuilder
+		}
+	)
+
 	builderByEntity := make(map[semantic.EntityID]*rootBuilderEntry)
 	builderByVariant := make(map[semantic.VariantID]*variantBuilderEntry)
 
@@ -24,7 +24,7 @@ func (p *Planner) initBuilders() {
 
 	for id := range p.model.Entities {
 		eid := semantic.EntityID(id)
-		if p.referencingEntities[eid] == 0 {
+		if p.referencingEntities[eid] == 0 && len(p.nestedsByEntity[eid]) == 0 {
 			continue
 		}
 
@@ -33,10 +33,13 @@ func (p *Planner) initBuilders() {
 		builderByEntity[eid] = &rootBuilderEntry{
 			ID: bid,
 			Builder: RootBuilder{
-				Entity:           eid,
-				FetchContextRoot: p.fetchContextRootByEntity[eid],
-				EntityResolver:   p.entityResolverByEntity[eid],
-				CommonBuilder:    CommonBuilder{ID: bid},
+				Entity:            eid,
+				FetchContextRoot:  p.fetchContextRootByEntity[eid],
+				EntityResolver:    p.entityResolverByEntity[eid],
+				NestedResolver:    p.nestedResolverByEntity[eid],
+				IsRelationBuilder: p.referencingEntities[eid] > 0,
+				IsNestedBuilder:   len(p.nestedsByEntity[eid]) > 0,
+				CommonBuilder:     CommonBuilder{ID: bid},
 			},
 		}
 	}
@@ -56,9 +59,9 @@ func (p *Planner) initBuilders() {
 		}
 		bmid := builderMethodID.Next()
 		parent.Builder.Methods = append(parent.Builder.Methods, VariantBuilderMethod{
-			CommonBuilderMethod: CommonBuilderMethod{ID: bmid},
-			Variant:             vid,
-			ChildBuilder:        bid,
+			ID:           bmid,
+			Variant:      vid,
+			ChildBuilder: bid,
 		})
 		parent.Builder.ChildBuilders = append(parent.Builder.ChildBuilders, RegularChildBuilder{
 			Builder: bid,
@@ -77,20 +80,20 @@ func (p *Planner) initBuilders() {
 			enableMethodID := builderMethodID.Next()
 
 			b.Builder.Methods = append(b.Builder.Methods, EnableBuilderMethod{
-				CommonBuilderMethod: CommonBuilderMethod{ID: enableMethodID},
-				Relation:            rid,
+				ID:       enableMethodID,
+				Relation: rid,
 			})
 
 			if cb, ok := builderByEntity[r.To]; ok {
 				b.Builder.Methods = append(b.Builder.Methods, DeepBuilderMethod{
-					CommonBuilderMethod: CommonBuilderMethod{ID: builderMethodID.Next()},
-					EnableMethodID:      enableMethodID,
-					Relation:            rid,
-					ChildBuilder:        cb.ID,
+					ID:             builderMethodID.Next(),
+					EnableMethodID: enableMethodID,
+					Relation:       rid,
+					ChildBuilder:   cb.ID,
 				})
 				b.Builder.ChildBuilders = append(b.Builder.ChildBuilders, RelationChildBuilder{
-					Relation:            rid,
-					RegularChildBuilder: RegularChildBuilder{Builder: cb.ID},
+					Builder:  cb.ID,
+					Relation: rid,
 				})
 			}
 
@@ -101,20 +104,36 @@ func (p *Planner) initBuilders() {
 		enableMethodID := builderMethodID.Next()
 
 		b.Builder.Methods = append(b.Builder.Methods, EnableBuilderMethod{
-			CommonBuilderMethod: CommonBuilderMethod{ID: enableMethodID},
-			Relation:            rid,
+			ID:       enableMethodID,
+			Relation: rid,
 		})
 
 		if cb, ok := builderByEntity[r.To]; ok {
 			b.Builder.Methods = append(b.Builder.Methods, DeepBuilderMethod{
-				CommonBuilderMethod: CommonBuilderMethod{ID: builderMethodID.Next()},
-				EnableMethodID:      enableMethodID,
-				Relation:            rid,
-				ChildBuilder:        cb.ID,
+				ID:             builderMethodID.Next(),
+				EnableMethodID: enableMethodID,
+				Relation:       rid,
+				ChildBuilder:   cb.ID,
 			})
 			b.Builder.ChildBuilders = append(b.Builder.ChildBuilders, RelationChildBuilder{
-				Relation:            rid,
-				RegularChildBuilder: RegularChildBuilder{Builder: cb.ID},
+				Builder:  cb.ID,
+				Relation: rid,
+			})
+		}
+	}
+
+	for _, n := range p.plan.Nesteds {
+		b := builderByEntity[n.From]
+
+		if cb, ok := builderByEntity[n.To]; ok {
+			b.Builder.Methods = append(b.Builder.Methods, NestedBuilderMethod{
+				ID:           builderMethodID.Next(),
+				Nested:       n.ID,
+				ChildBuilder: cb.ID,
+			})
+			b.Builder.ChildBuilders = append(b.Builder.ChildBuilders, NestedChildBuilder{
+				Builder: cb.ID,
+				Nested:  n.ID,
 			})
 		}
 	}

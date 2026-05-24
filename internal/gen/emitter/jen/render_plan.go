@@ -9,7 +9,7 @@ func (r *Renderer) renderPlanInterface() {
 
 	r.f.Add(block(
 		Type().Id(r.naming.Plan.Interface).Types(Add(typeParamRoot).Any()).Interface(
-			r.generatePlanNewInstanceMethodSignature(typeParamRoot, Null(), Null(), Null()),
+			r.generatePlanNewInstanceMethodSignature(typeParamRoot, Null(), Null(), Null(), Null()),
 		),
 	))
 }
@@ -18,8 +18,13 @@ func (r *Renderer) generatePlanInterfaceType(typeParamRoot Code) Code {
 	return Id(r.naming.Plan.Interface).Types(typeParamRoot)
 }
 
-func (r *Renderer) generatePlanNewInstanceMethodSignature(typeParamRoot, iterParam, prefetchResolverParam, entityPrefetcher Code) Code {
-	return Id(r.naming.Plan.NewInstanceMethod).Params(Add(iterParam, iterSeq).Types(typeParamRoot), Add(prefetchResolverParam).Id(r.naming.PrefetchResolver.Interface), Add(entityPrefetcher).Id(r.naming.EntityPrefetcher.Interface)).Params(Id(r.naming.Instance.Interface))
+func (r *Renderer) generatePlanNewInstanceMethodSignature(typeParamRoot, iterParam, prefetchResolverParam, entityPrefetcher, opts Code) Code {
+	return Id(r.naming.Plan.NewInstanceMethod).Params(
+		Add(iterParam, iterSeq).Types(typeParamRoot),
+		Add(prefetchResolverParam).Id(r.naming.PrefetchResolver.Interface),
+		Add(entityPrefetcher).Id(r.naming.EntityPrefetcher.Interface),
+		Add(opts).Op("...").Add(libInstanceOption),
+	).Params(Id(r.naming.Instance.Interface))
 }
 
 func (r *Renderer) renderPlanImplementation() {
@@ -49,14 +54,23 @@ func (r *Renderer) renderPlanStructNewInstanceMethod(rcv, typeParamRoot Code) {
 	iter := Id("i")
 	prefetchResolver := Id("pr")
 	entityPrefetcher := Id("ep")
+	opts := Id("opts")
+	opt := Id("opt")
+	config := Id("c")
 
 	r.f.Add(block(
-		Add(r.generatePlanStructMethodBase(rcv, typeParamRoot), r.generatePlanNewInstanceMethodSignature(typeParamRoot, iter, prefetchResolver, entityPrefetcher)).Block(
+		Add(r.generatePlanStructMethodBase(rcv, typeParamRoot), r.generatePlanNewInstanceMethodSignature(typeParamRoot, iter, prefetchResolver, entityPrefetcher, opts)).Block(
+			Add(config).Op(":=").Id(r.naming.Instance.DefaultConfig),
+			For(List(Id("_"), opt).Op(":=").Range().Add(opts)).Block(
+				Add(opt).Dot("Apply").Call(Op("&").Add(config)),
+			),
+			Empty(),
 			Return(r.generateInstanceStructInit(
 				r.generateFetchContextConstructorForEntityCall(Add(rcv).Dot(r.naming.Plan.FieldFetchContextConstructor), iter),
 				Add(rcv).Dot(r.naming.Plan.FieldResolvers),
 				prefetchResolver,
 				entityPrefetcher,
+				config,
 			)),
 		),
 	))

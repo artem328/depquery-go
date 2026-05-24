@@ -22,7 +22,7 @@ func (r *Renderer) renderBuilderInterface(b plan.Builder) {
 func (r *Renderer) renderBuilderInterfaceDefinition(b plan.Builder) {
 	methods := make([]Code, 0, len(b.GetMethods()))
 	for _, m := range b.GetMethods() {
-		methods = append(methods, r.generateBuilderMethodSignature(b, m, ""))
+		methods = append(methods, r.generateBuilderMethodSignature(b, m, Null()))
 	}
 
 	r.f.Add(block(
@@ -39,7 +39,7 @@ func (r *Renderer) renderBuilderEntrypoint(b plan.Builder) {
 	e := r.plan.Model.Entities[rb.Entity]
 
 	builderIfaceType := Id(r.naming.Builder.Interface[rb.GetID()])
-	const funcVar = "f"
+	funcVar := Id("f")
 
 	builder := r.generateRootBuilderConstructorCall(rb.GetID(), r.generateBuildContextConstructorCall(), Lit(0))
 
@@ -49,12 +49,12 @@ func (r *Renderer) renderBuilderEntrypoint(b plan.Builder) {
 		).Params(
 			r.generateCompilerInterfaceType(builderIfaceType, r.types[e.Type]),
 		).Block(
-			Return(r.generateCompilerWithMethodCall(builder, Id(funcVar))),
+			Return(r.generateCompilerWithMethodCall(builder, funcVar)),
 		),
 	))
 }
 
-func (r *Renderer) generateBuilderMethodSignature(b plan.Builder, m plan.BuilderMethod, funcVar string) Code {
+func (r *Renderer) generateBuilderMethodSignature(b plan.Builder, m plan.BuilderMethod, funcVar Code) Code {
 	method := Id(r.naming.Builder.Method[m.GetID()])
 
 	switch mm := m.(type) {
@@ -63,6 +63,8 @@ func (r *Renderer) generateBuilderMethodSignature(b plan.Builder, m plan.Builder
 	case plan.DeepBuilderMethod:
 		method.Params(r.generateBuilderCallbackParam(Id(r.naming.Builder.Interface[mm.ChildBuilder]), funcVar))
 	case plan.VariantBuilderMethod:
+		method.Params(r.generateBuilderCallbackParam(Id(r.naming.Builder.Interface[mm.ChildBuilder]), funcVar))
+	case plan.NestedBuilderMethod:
 		method.Params(r.generateBuilderCallbackParam(Id(r.naming.Builder.Interface[mm.ChildBuilder]), funcVar))
 	default:
 		panic(fmt.Errorf("unknown builder method type: %T", m))
@@ -81,15 +83,18 @@ func (r *Renderer) renderBuilderImplementation(b plan.Builder) {
 	r.renderBuilderStructDefinition(b)
 	r.renderBuilderConstructor(b)
 
-	rcvVar := "b"
+	rcv := Id("b")
 
 	if rb, ok := b.(plan.RootBuilder); ok {
-		r.renderBuilderCompilerImplementation(rb, rcvVar)
-		r.renderBuilderCandidateImplementation(rb, rcvVar)
+		r.renderBuilderCompilerImplementation(rb, rcv)
 	}
 
 	for _, m := range b.GetMethods() {
-		r.renderBuilderMethod(b, m, rcvVar)
+		r.renderBuilderMethod(b, m, rcv)
+	}
+
+	if rb, ok := b.(plan.RootBuilder); ok {
+		r.renderBuilderCandidateImplementation(rb)
 	}
 }
 
@@ -116,10 +121,17 @@ func (r *Renderer) generateBuilderBaseFieldsDefinition(b plan.Builder) []Code {
 	case plan.RootBuilder:
 		fields = append(fields,
 			Id(r.naming.Builder.FieldContext).Op("*").Id(r.naming.BuildContext.Type),
-			Id(r.naming.Builder.FieldID).Add(libID),
 			Id(r.naming.Builder.FieldParentID).Add(libID),
-			Id(r.naming.Builder.FieldRelations).Id("uint64"),
+			Id(r.naming.Builder.FieldID).Add(libID),
 		)
+
+		if bb.IsRelationBuilder {
+			fields = append(fields, Id(r.naming.Builder.FieldRelations).Uint64())
+		}
+
+		if bb.IsNestedBuilder {
+			fields = append(fields, Id(r.naming.Builder.FieldNested).Uint64())
+		}
 	case plan.VariantBuilder:
 		fields = append(fields,
 			Op("*").Id(r.naming.Builder.Struct[bb.Parent]),
@@ -138,6 +150,8 @@ func (r *Renderer) generateBuilderChildBuilderFieldDefinition(cb plan.ChildBuild
 		builderName = r.naming.Builder.ChildBuilder[cbb.Builder]
 	case plan.RelationChildBuilder:
 		builderName = r.naming.Relation.ChildBuilder[cbb.Relation]
+	case plan.NestedChildBuilder:
+		builderName = r.naming.Nested.ChildBuilder[cbb.Nested]
 	default:
 		panic(fmt.Errorf("unknown child builder type: %T", cb))
 	}
@@ -203,20 +217,33 @@ func (r *Renderer) generateBuilderConstructorBody(b plan.Builder, args []Code) [
 }
 
 func (r *Renderer) generateRootBuilderConstructorBody(b plan.RootBuilder, ctxArg, parentIdArg Code) []Code {
-	builder := Op("&").Id(r.naming.Builder.Struct[b.GetID()]).Values(
+	var fields []Code
+
+	fields = append(fields,
 		Id(r.naming.Builder.FieldContext).Op(":").Add(ctxArg),
-		Id(r.naming.Builder.FieldID).Op(":").Add(r.generateBuildContextNextIDMethodCall(ctxArg)),
 		Id(r.naming.Builder.FieldParentID).Op(":").Add(parentIdArg),
+		Id(r.naming.Builder.FieldID).Op(":").Add(r.generateBuildContextNextIDMethodCall(ctxArg)),
 	)
+
+	builder := Op("&").Id(r.naming.Builder.Struct[b.GetID()]).Add(valuesMultiline(fields...))
 
 	builderVar := Id("b")
 
-	return []Code{
-		Add(builderVar).Op(":=").Add(builder),
-		Add(r.generateBuildContextAddCandidateMethodCall(ctxArg, Add(builderVar).Dot(r.naming.Builder.FieldID), builderVar)),
-		Empty(),
-		Return(builderVar),
+	var body []Code
+
+	body = append(body, Add(builderVar).Op(":=").Add(builder))
+	body = append(body, Empty())
+	var subID uint
+	if b.IsRelationBuilder {
+		body = append(body, r.generateBuildContextAddCandidateMethodCall(ctxArg, Add(builderVar).Dot(r.naming.Builder.FieldID), Lit(subID), Id(r.naming.Candidate.RelationStruct[b.ID]).Values(builderVar, Lit(subID))))
+		subID++
 	}
+	if b.IsNestedBuilder {
+		body = append(body, r.generateBuildContextAddCandidateMethodCall(ctxArg, Add(builderVar).Dot(r.naming.Builder.FieldID), Lit(subID), Id(r.naming.Candidate.NestedStruct[b.ID]).Values(builderVar, Lit(subID))))
+	}
+	body = append(body, Empty(), Return(builderVar))
+
+	return body
 }
 
 func (r *Renderer) generateVariantBuilderConstructorBody(b plan.VariantBuilder, parentArg Code) []Code {
@@ -227,18 +254,17 @@ func (r *Renderer) generateVariantBuilderConstructorBody(b plan.VariantBuilder, 
 	}
 }
 
-func (r *Renderer) renderBuilderCompilerImplementation(b plan.RootBuilder, rcvVar string) {
+func (r *Renderer) renderBuilderCompilerImplementation(b plan.RootBuilder, rcv Code) {
 	e := r.plan.Model.Entities[b.Entity]
 
-	const funcVar = "f"
-	rcv := Id(rcvVar)
-	f := Id(funcVar)
+	funcVar := Id("f")
 	typeParamBuilder := Id(r.naming.Builder.Interface[b.GetID()])
 	typeParamRoot := r.types[e.Type]
+	opts := Id("opts")
 
 	r.f.Add(block(
 		Add(r.generateBuilderMethodBase(b, rcv), r.generateCompilerWithMethodSignature(typeParamBuilder, typeParamRoot, funcVar)).Block(
-			r.generateCompilerWithMethodBody(rcv, f)...,
+			r.generateCompilerWithMethodBody(rcv, funcVar)...,
 		),
 	))
 
@@ -247,34 +273,88 @@ func (r *Renderer) renderBuilderCompilerImplementation(b plan.RootBuilder, rcvVa
 	))
 
 	r.f.Add(block(
-		Add(r.generateBuilderMethodBase(b, rcv), r.generateCompilerCompileMethodSignature(typeParamRoot)).Block(r.generateCompilerCompileMethodBody(typeParamRoot, Id(r.naming.FetchContext.ConstructorForEntity[b.FetchContextRoot]), Add(rcv).Dot(r.naming.Builder.FieldContext))...),
+		Add(r.generateBuilderMethodBase(b, rcv), r.generateCompilerCompileMethodSignature(typeParamRoot, opts)).Block(
+			r.generateCompilerCompileMethodBody(typeParamRoot, opts, Id(r.naming.FetchContext.ConstructorForEntity[b.FetchContextRoot]), Add(rcv).Dot(r.naming.Builder.FieldContext))...),
 	))
 }
 
-func (r *Renderer) renderBuilderCandidateImplementation(b plan.RootBuilder, rcvVar string) {
-	rcv := Id(rcvVar)
+func (r *Renderer) renderBuilderCandidateImplementation(b plan.RootBuilder) {
+	if b.IsRelationBuilder {
+		r.renderBuilderRelationsCandidateImplementation(b)
+	}
+
+	if b.IsNestedBuilder {
+		r.renderBuilderNestedCandidateImplementation(b)
+	}
+}
+
+func (r *Renderer) renderBuilderRelationsCandidateImplementation(b plan.RootBuilder) {
+	const builderField = "b"
 
 	r.f.Add(block(
-		Add(r.generateBuilderMethodBase(b, rcv), r.generateCandidateCandidateMethodSignature()).Block(
-			r.generateCandidateCandidateMethodBody(rcv)...,
+		r.generateBuilderRelationsCandidateStruct(b, builderField),
+	))
+
+	rcv := Id("c")
+
+	r.f.Add(block(
+		Add(r.generateBuilderCandidateMethodBase(r.naming.Candidate.RelationStruct[b.ID], rcv), r.generateCandidateCandidateMethodSignature()).Block(
+			r.generateCandidateRelationCandidateMethodBody(rcv, Add(rcv).Dot(builderField))...,
 		),
 	))
 
 	r.f.Add(block(
-		Add(r.generateBuilderMethodBase(b, rcv), r.generateCandidateResolverMethodSignature()).Block(
-			r.generateCandidateResolverMethodBody(b.EntityResolver, rcv)...,
+		Add(r.generateBuilderCandidateMethodBase(r.naming.Candidate.RelationStruct[b.ID], rcv), r.generateCandidateResolverMethodSignature()).Block(
+			r.generateCandidateRelationsResolverMethodBody(b.EntityResolver, Add(rcv).Dot(builderField))...,
 		),
 	))
 }
 
-func (r *Renderer) renderBuilderMethod(b plan.Builder, m plan.BuilderMethod, rcvVar string) {
-	const funcVar = "f"
-
-	rcv := Id(rcvVar)
-	childRcv := Id(funcVar)
+func (r *Renderer) renderBuilderNestedCandidateImplementation(b plan.RootBuilder) {
+	const builderField = "b"
 
 	r.f.Add(block(
-		Add(r.generateBuilderMethodBase(b, rcv), r.generateBuilderMethodSignature(b, m, funcVar)).Block(
+		r.generateBuilderNestedCandidateStruct(b, builderField),
+	))
+
+	rcv := Id("c")
+
+	r.f.Add(block(
+		Add(r.generateBuilderCandidateMethodBase(r.naming.Candidate.NestedStruct[b.ID], rcv), r.generateCandidateCandidateMethodSignature()).Block(
+			r.generateCandidateNestedCandidateMethodBody(rcv, Add(rcv).Dot(builderField))...,
+		),
+	))
+
+	r.f.Add(block(
+		Add(r.generateBuilderCandidateMethodBase(r.naming.Candidate.NestedStruct[b.ID], rcv), r.generateCandidateResolverMethodSignature()).Block(
+			r.generateCandidateNestedResolverMethodBody(b.NestedResolver, Add(rcv).Dot(builderField))...,
+		),
+	))
+}
+
+func (r *Renderer) generateBuilderRelationsCandidateStruct(b plan.RootBuilder, builderField string) Code {
+	return Type().Id(r.naming.Candidate.RelationStruct[b.ID]).Struct(
+		Id(builderField).Op("*").Id(r.naming.Builder.Struct[b.ID]),
+		Id(r.naming.Candidate.FieldSubID).Uint(),
+	)
+}
+
+func (r *Renderer) generateBuilderNestedCandidateStruct(b plan.RootBuilder, builderField string) Code {
+	return Type().Id(r.naming.Candidate.NestedStruct[b.ID]).Struct(
+		Id(builderField).Op("*").Id(r.naming.Builder.Struct[b.ID]),
+		Id(r.naming.Candidate.FieldSubID).Uint(),
+	)
+}
+
+func (r *Renderer) generateBuilderCandidateMethodBase(structName string, rcv Code) Code {
+	return Func().Params(Add(rcv).Id(structName))
+}
+
+func (r *Renderer) renderBuilderMethod(b plan.Builder, m plan.BuilderMethod, rcv Code) {
+	childRcv := Id("f")
+
+	r.f.Add(block(
+		Add(r.generateBuilderMethodBase(b, rcv), r.generateBuilderMethodSignature(b, m, childRcv)).Block(
 			r.generateBuilderMethodBody(m, rcv, childRcv)...,
 		),
 	))
@@ -288,6 +368,8 @@ func (r *Renderer) generateBuilderMethodBody(m plan.BuilderMethod, rcv, childRcv
 		return r.generateBuilderDeepMethodBody(mm, rcv, childRcv)
 	case plan.VariantBuilderMethod:
 		return r.generateBuilderVariantMethodBody(mm, rcv, childRcv)
+	case plan.NestedBuilderMethod:
+		return r.generateBuilderNestedMethodBody(mm, rcv, childRcv)
 	default:
 		panic(fmt.Errorf("unknown builder method type: %T", m))
 	}
@@ -339,8 +421,24 @@ func (r *Renderer) generateBuilderVariantMethodBody(m plan.VariantBuilderMethod,
 	}
 }
 
-func (r *Renderer) generateBuilderCallbackParam(builderType Code, funcVar string) Code {
-	return Id(funcVar).Func().Params(builderType)
+func (r *Renderer) generateBuilderNestedMethodBody(m plan.NestedBuilderMethod, rcv, childRcv Code) []Code {
+	return []Code{
+		Add(rcv).Dot(r.naming.Builder.FieldNested).Op("|=").Id(r.naming.Nested.ConstantName[m.Nested]),
+		Empty(),
+		If(Add(rcv).Dot(r.naming.Nested.ChildBuilder[m.Nested]).Op("==").Nil()).Block(
+			Add(rcv).Dot(r.naming.Nested.ChildBuilder[m.Nested]).Op("=").Add(r.generateRootBuilderConstructorCall(m.ChildBuilder, Add(rcv).Dot(r.naming.Builder.FieldContext), Add(rcv).Dot(r.naming.Builder.FieldID))),
+		),
+		Empty(),
+		If(Add(childRcv).Op("!=").Nil()).Block(
+			Add(childRcv).Call(Add(rcv).Dot(r.naming.Nested.ChildBuilder[m.Nested])),
+		),
+		Empty(),
+		Return(rcv),
+	}
+}
+
+func (r *Renderer) generateBuilderCallbackParam(builderType Code, funcParam Code) Code {
+	return Add(funcParam).Func().Params(builderType)
 }
 
 func (r *Renderer) generateBuilderMethodBase(b plan.Builder, rcv Code) Code {

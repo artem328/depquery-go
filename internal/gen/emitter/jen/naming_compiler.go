@@ -7,6 +7,7 @@ type compilerNaming struct {
 	WithMethod    string
 	BuilderMethod string
 	CompileMethod string
+	DefaultConfig string
 }
 
 func (n *compilerNaming) warmUp(plan.Plan) {
@@ -14,4 +15,5 @@ func (n *compilerNaming) warmUp(plan.Plan) {
 	n.WithMethod = "With"
 	n.BuilderMethod = "Builder"
 	n.CompileMethod = "Compile"
+	n.DefaultConfig = "defaultCompilerConfig"
 }

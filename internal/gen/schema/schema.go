@@ -10,9 +10,11 @@ type (
 	Entity struct {
 		ID         Value[string]
 		Name       Value[string]
+		Synthetic  Value[bool]
 		Type       Type
 		Relations  []Relation
 		Variants   []Variant
+		Nested     []Nested
 		Definition Definition
 	}
 
@@ -33,6 +35,12 @@ type (
 		Name       Value[string]
 		Type       Type
 		Relations  []Relation
+		Definition Definition
+	}
+
+	Nested struct {
+		Name       Value[string]
+		Entity     Value[string]
 		Definition Definition
 	}
 )

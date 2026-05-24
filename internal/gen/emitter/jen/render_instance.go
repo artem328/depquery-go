@@ -18,12 +18,21 @@ func (r *Renderer) generateInstanceResolveMethodSignature(ctxParam Code) Code {
 }
 
 func (r *Renderer) renderInstanceImplementation() {
+	r.renderInstanceDefaultConfig()
 	r.renderInstanceStruct()
 
 	rcv := Id("i")
 
 	r.renderInstanceResolveMethodImplementation(rcv)
 	r.renderInstancePrefetchMethodImplementation(rcv)
+}
+
+func (r *Renderer) renderInstanceDefaultConfig() {
+	r.f.Add(block(
+		Var().Id(r.naming.Instance.DefaultConfig).Op("=").Add(libInstanceConfig).Add(valuesMultiline(
+			Id("Executor").Op(":").Add(libConcurrentExecutor).Values(),
+		)),
+	))
 }
 
 func (r *Renderer) renderInstanceStruct() {
@@ -33,16 +42,18 @@ func (r *Renderer) renderInstanceStruct() {
 			Id(r.naming.Instance.FieldResolvers).Index().Index().Id(r.naming.Resolver.Type),
 			Id(r.naming.Instance.FieldPrefetchResolver).Id(r.naming.PrefetchResolver.Interface),
 			Id(r.naming.Instance.FieldEntityPrefetcher).Id(r.naming.EntityPrefetcher.Interface),
+			Id(r.naming.Instance.FieldConfig).Add(libInstanceConfig),
 		),
 	))
 }
 
-func (r *Renderer) generateInstanceStructInit(fetchContext, resolvers, prefetchResolver, entityPrefetcher Code) Code {
+func (r *Renderer) generateInstanceStructInit(fetchContext, resolvers, prefetchResolver, entityPrefetcher, config Code) Code {
 	return Id(r.naming.Instance.Struct).Add(valuesMultiline(
 		Id(r.naming.Instance.FieldFetchContext).Op(":").Add(fetchContext),
 		Id(r.naming.Instance.FieldResolvers).Op(":").Add(resolvers),
 		Id(r.naming.Instance.FieldPrefetchResolver).Op(":").Add(prefetchResolver),
 		Id(r.naming.Instance.FieldEntityPrefetcher).Op(":").Add(entityPrefetcher),
+		Id(r.naming.Instance.FieldConfig).Op(":").Add(config),
 	))
 }
 
@@ -60,7 +71,7 @@ func (r *Renderer) renderInstanceResolveMethodImplementation(rcv Code) {
 		Add(r.generateInstanceMethodBase(rcv), r.generateInstanceResolveMethodSignature(ctx)).Block(
 			For(List(swallow, level).Op(":=").Range().Add(rcv).Dot(r.naming.Instance.FieldResolvers)).Block(
 				For(List(swallow, resolver).Op(":=").Range().Add(level)).Block(
-					r.generateResolverCall(resolver, Add(rcv).Dot(r.naming.Instance.FieldFetchContext), Add(rcv).Dot(r.naming.Instance.FieldPrefetchResolver)),
+					r.generateResolverEntityCall(resolver, Add(rcv).Dot(r.naming.Instance.FieldFetchContext), Add(rcv).Dot(r.naming.Instance.FieldPrefetchResolver)),
 				),
 				Empty(),
 				If(Err().Op(":=").Add(r.generateInstancePrefetchMethodCall(rcv, ctx)), Err().Op("!=").Nil()).Block(
@@ -84,34 +95,59 @@ func (r *Renderer) renderInstancePrefetchMethodImplementation(rcv Code) {
 }
 
 func (r *Renderer) generateInstancePrefetchMethodBody(rcv, ctx Code) []Code {
+	prefetchTasks := Id("prefetch")
+	processTasks := Id("process")
+	processTask := Id("task")
+
 	var statements []Code
 
-	statements = append(statements, Defer().Add(r.generateFetchContextFlushMethodCall(Add(rcv).Dot(r.naming.Instance.FieldFetchContext))))
+	statements = append(statements,
+		Defer().Add(r.generateFetchContextFlushMethodCall(Add(rcv).Dot(r.naming.Instance.FieldFetchContext))),
+		Empty(),
+		Add(prefetchTasks).Op(":=").Make(Index().Add(libTask), Lit(0), Lit(len(r.plan.EntityFetches))),
+		Add(processTasks).Op(":=").Make(Index().Func().Params(), Lit(0), Lit(len(r.plan.EntityFetches))),
+	)
 
 	for _, ef := range r.plan.EntityFetches {
-		statements = append(statements, Empty(), r.generateInstancePrefetchBlock(ef, rcv, ctx))
+		statements = append(statements, Empty(), r.generateInstancePrefetchBlock(ef, rcv, prefetchTasks, processTasks))
 	}
 
-	statements = append(statements, Empty(), Return(Nil()))
+	statements = append(statements,
+		Empty(),
+		If(Err().Op(":=").Add(rcv).Dot(r.naming.Instance.FieldConfig).Dot("Executor").Dot("Execute").Call(ctx, prefetchTasks), Err().Op("!=").Nil()).Block(
+			Return(Err()),
+		),
+		Empty(),
+		For(List(Id("_"), processTask).Op(":=").Range().Add(processTasks)).Block(
+			Add(processTask).Call(),
+		),
+		Empty(),
+		Return(Nil()),
+	)
 
 	return statements
 }
 
-func (r *Renderer) generateInstancePrefetchBlock(ef plan.EntityFetch, rcv, ctx Code) Code {
-	pending := Id("p")
+func (r *Renderer) generateInstancePrefetchBlock(ef plan.EntityFetch, rcv, prefetchTasks, processTasks Code) Code {
+	e := r.plan.Model.Entities[ef.Entity]
 
+	pending := Id("p")
 	entities := Id("ee")
 	entity := Id("e")
+	ctx := Id("ctx")
 
 	return If(Add(pending).Op(":=").Add(rcv).Dot(r.naming.Instance.FieldFetchContext).Dot(r.naming.FetchContext.FieldPending[ef.Child]), Len(pending).Op(">").Lit(0)).Block(
-		List(entities, Err()).Op(":=").Add(r.generateEntityPrefetcherMethodCall(ef.PrefetchMethod, Add(rcv).Dot(r.naming.Instance.FieldEntityPrefetcher), ctx, pending)),
-		If(Err().Op("!=").Nil()).Block(
+		Var().Add(entities).Add(iterSeq).Types(r.types[e.Type]),
+		appendSlice(prefetchTasks, Func().Params(Add(ctx, contextContext)).Params(Err().Error()).Block(
+			List(entities, Err()).Op("=").Add(r.generateEntityPrefetcherMethodCall(ef.PrefetchMethod, Add(rcv).Dot(r.naming.Instance.FieldEntityPrefetcher), ctx, pending)),
+			Empty(),
 			Return(Err()),
-		),
-		Empty(),
-		For(Add(entity).Op(":=").Range().Add(entities)).Block(
-			r.generateStateAdderMethodCall(ef.StateContainer, Add(rcv).Dot(r.naming.Instance.FieldFetchContext), entity),
-		),
+		)),
+		appendSlice(processTasks, Func().Params().Block(
+			For(Add(entity).Op(":=").Range().Add(entities)).Block(
+				r.generateStateAdderMethodCall(ef.StateContainer, Add(rcv).Dot(r.naming.Instance.FieldFetchContext), entity),
+			),
+		)),
 	)
 }
 

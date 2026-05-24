@@ -14,10 +14,10 @@ func (p *Planner) initState() {
 	p.plan.StateContainers = make([]StateContainer, 0, len(p.model.Entities))
 	p.plan.ReversedStateContainers = make([]ReversedStateContainer, 0, len(p.model.Relations))
 
-	for id := range p.model.Entities {
+	for id, e := range p.model.Entities {
 		eid := semantic.EntityID(id)
 
-		if p.referencedEntities[eid] == 0 && p.referencingEntities[eid] == 0 {
+		if (p.referencedEntities[eid] == 0 && p.referencingEntities[eid] == 0 && len(p.nestedsByEntity[eid]) == 0) || e.Synthetic {
 			// TODO: warning
 			continue
 		}

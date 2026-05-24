@@ -8,19 +8,18 @@ func (r *Renderer) renderCompilerInterface() {
 
 	r.f.Add(block(
 		Type().Id(r.naming.Compiler.Interface).Types(typeParamBuilder, Add(typeParamRoot).Any()).Interface(
-			r.generateCompilerWithMethodSignature(typeParamBuilder, typeParamRoot, ""),
+			r.generateCompilerWithMethodSignature(typeParamBuilder, typeParamRoot, Null()),
 			r.generateCompilerBuilderMethodSignature(typeParamBuilder),
-			r.generateCompilerCompileMethodSignature(typeParamRoot),
+			r.generateCompilerCompileMethodSignature(typeParamRoot, Null()),
 		),
 	))
-
 }
 
 func (r *Renderer) generateCompilerInterfaceType(typeParamBuilder, typeParamRoot Code) Code {
 	return Id(r.naming.Compiler.Interface).Types(typeParamBuilder, typeParamRoot)
 }
 
-func (r *Renderer) generateCompilerWithMethodSignature(typeParamBuilder, typeParamRoot Code, funcVar string) Code {
+func (r *Renderer) generateCompilerWithMethodSignature(typeParamBuilder, typeParamRoot, funcVar Code) Code {
 	return Id(r.naming.Compiler.WithMethod).Params(
 		r.generateBuilderCallbackParam(typeParamBuilder, funcVar),
 	).Params(
@@ -52,12 +51,28 @@ func (r *Renderer) generateCompilerBuilderMethodBody(rcv Code) []Code {
 	}
 }
 
-func (r *Renderer) generateCompilerCompileMethodSignature(typeParamRoot Code) Code {
-	return Id(r.naming.Compiler.CompileMethod).Params().Params(r.generatePlanInterfaceType(typeParamRoot))
+func (r *Renderer) generateCompilerCompileMethodSignature(typeParamRoot, opts Code) Code {
+	return Id(r.naming.Compiler.CompileMethod).Params(Add(opts).Op("...").Add(libCompilerOption)).Params(r.generatePlanInterfaceType(typeParamRoot))
 }
 
-func (r *Renderer) generateCompilerCompileMethodBody(typeParamRoot, fetchCtxConstructor, buildContext Code) []Code {
+func (r *Renderer) generateCompilerCompileMethodBody(typeParamRoot, opts, fetchCtxConstructor, buildContext Code) []Code {
+	config := Id("c")
+	opt := Id("opt")
+
 	return []Code{
-		Return(r.generatePlanStructInit(typeParamRoot, fetchCtxConstructor, r.generateBuildContextPlanMethodCall(buildContext, Add(libTopologicalPlanner).Values()))),
+		Add(config).Op(":=").Id(r.naming.Compiler.DefaultConfig),
+		For(List(Id("_"), opt).Op(":=").Range().Add(opts)).Block(
+			Add(opt).Dot("Apply").Call(Op("&").Add(config)),
+		),
+		Empty(),
+		Return(r.generatePlanStructInit(typeParamRoot, fetchCtxConstructor, r.generateBuildContextPlanMethodCall(buildContext, Add(config).Dot("Planner")))),
 	}
+}
+
+func (r *Renderer) renderCompilerDefaultConfig() {
+	r.f.Add(block(
+		Var().Id(r.naming.Compiler.DefaultConfig).Op("=").Add(libCompilerConfig).Add(valuesMultiline(
+			Id("Planner").Op(":").Add(libBFSPlanner).Values(),
+		)),
+	))
 }

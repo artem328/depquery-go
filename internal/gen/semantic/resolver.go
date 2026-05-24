@@ -45,6 +45,11 @@ func (r *Resolver) Build() (Model, []error) {
 		return Model{}, r.errors
 	}
 
+	r.initNested()
+	if len(r.errors) > 0 {
+		return Model{}, r.errors
+	}
+
 	r.initRelations()
 	if len(r.errors) > 0 {
 		return Model{}, r.errors

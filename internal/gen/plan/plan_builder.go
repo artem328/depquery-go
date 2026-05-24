@@ -36,9 +36,26 @@ func (cb RegularChildBuilder) GetBuilderID() BuilderID {
 func (RegularChildBuilder) isChildBuilder() {}
 
 type RelationChildBuilder struct {
-	RegularChildBuilder
+	Builder  BuilderID
 	Relation RelationID
 }
+
+func (cb RelationChildBuilder) GetBuilderID() BuilderID {
+	return cb.Builder
+}
+
+func (RelationChildBuilder) isChildBuilder() {}
+
+type NestedChildBuilder struct {
+	Builder BuilderID
+	Nested  NestedID
+}
+
+func (cb NestedChildBuilder) GetBuilderID() BuilderID {
+	return cb.Builder
+}
+
+func (NestedChildBuilder) isChildBuilder() {}
 
 type CommonBuilder struct {
 	ID            BuilderID
@@ -59,9 +76,12 @@ func (b CommonBuilder) GetChildBuilders() []ChildBuilder {
 }
 
 type RootBuilder struct {
-	Entity           semantic.EntityID
-	FetchContextRoot FetchContextRootID
-	EntityResolver   EntityResolverID
+	Entity            semantic.EntityID
+	FetchContextRoot  FetchContextRootID
+	EntityResolver    EntityResolverID
+	NestedResolver    NestedResolverID
+	IsRelationBuilder bool
+	IsNestedBuilder   bool
 	CommonBuilder
 }
 
@@ -87,34 +107,50 @@ type BuilderMethod interface {
 	isBuilderMethod()
 }
 
-type CommonBuilderMethod struct {
-	ID BuilderMethodID
-}
-
-func (m CommonBuilderMethod) GetID() BuilderMethodID {
-	return m.ID
-}
-
 type EnableBuilderMethod struct {
-	CommonBuilderMethod
+	ID       BuilderMethodID
 	Relation RelationID
+}
+
+func (m EnableBuilderMethod) GetID() BuilderMethodID {
+	return m.ID
 }
 
 func (EnableBuilderMethod) isBuilderMethod() {}
 
 type DeepBuilderMethod struct {
-	CommonBuilderMethod
+	ID             BuilderMethodID
 	EnableMethodID BuilderMethodID
 	Relation       RelationID
 	ChildBuilder   BuilderID
 }
 
+func (m DeepBuilderMethod) GetID() BuilderMethodID {
+	return m.ID
+}
+
 func (DeepBuilderMethod) isBuilderMethod() {}
 
 type VariantBuilderMethod struct {
-	CommonBuilderMethod
+	ID           BuilderMethodID
 	Variant      semantic.VariantID
 	ChildBuilder BuilderID
 }
 
+func (m VariantBuilderMethod) GetID() BuilderMethodID {
+	return m.ID
+}
+
 func (VariantBuilderMethod) isBuilderMethod() {}
+
+type NestedBuilderMethod struct {
+	ID           BuilderMethodID
+	Nested       NestedID
+	ChildBuilder BuilderID
+}
+
+func (m NestedBuilderMethod) GetID() BuilderMethodID {
+	return m.ID
+}
+
+func (NestedBuilderMethod) isBuilderMethod() {}

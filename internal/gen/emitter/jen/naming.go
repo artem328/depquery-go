@@ -13,6 +13,7 @@ type naming struct {
 	Resolver         resolverNaming
 	Builder          builderNaming
 	Relation         relationNaming
+	Nested           nestedNaming
 	Candidate        candidateNaming
 	BuildContext     buildContextNaming
 	Plan             planNaming
@@ -28,6 +29,7 @@ func (n *naming) warmUp(p plan.Plan) {
 	n.Resolver.warmUp(p)
 	n.Builder.warmUp(p)
 	n.Relation.warmUp(p)
+	n.Nested.warmUp(p)
 	n.Candidate.warmUp(p)
 	n.BuildContext.warmUp(p)
 	n.Plan.warmUp(p)

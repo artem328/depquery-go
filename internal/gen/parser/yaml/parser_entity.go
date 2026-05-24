@@ -17,10 +17,14 @@ func (p *Parser) parseEntity(name, entity *yaml.Node) schema.Entity {
 			e.Type = p.parseType(value)
 		case "id":
 			e.ID = p.consumeStringValue(value)
+		case "synthetic":
+			e.Synthetic = p.consumeBoolValue(value)
 		case "relations":
 			e.Relations = p.parseRelations(value)
 		case "variants":
 			e.Variants = p.parseVariants(value)
+		case "nested":
+			e.Nested = p.parseNestedFields(value)
 		default:
 			p.err(key, "unknown entity key: "+key.Value)
 		}

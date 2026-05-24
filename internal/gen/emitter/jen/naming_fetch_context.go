@@ -7,30 +7,32 @@ import (
 )
 
 type fetchContextNaming struct {
-	Struct               string
-	Constructor          string
-	ConstructorForEntity []string
-	FieldByParentID      []string
-	FieldChildSeen       []string
-	FieldPending         []string
-	EnqueueMethod        []string
-	ParentGetterMethod   []string
-	FlushMethod          string
+	Struct                  string
+	Constructor             string
+	ConstructorForEntity    []string
+	FieldByParentID         []string
+	FieldSyntheticState     []string
+	FieldChildSeen          []string
+	FieldPending            []string
+	EnqueueMethod           []string
+	ParentGetterMethod      []string
+	AddNestedMethod         []string
+	FlushMethod             string
+	SyntheticNamespaceConst string
 }
 
 func (n *fetchContextNaming) warmUp(p plan.Plan) {
 	n.Struct = "fetchContext"
 	n.Constructor = "newFetchContext"
 	n.FlushMethod = "flush"
+	n.SyntheticNamespaceConst = "syntheticIDNamespace"
 
 	n.FieldByParentID = make([]string, len(p.FetchParents))
-	n.ParentGetterMethod = make([]string, len(p.FetchParents))
 
 	for id := range p.FetchParents {
 		fpid := plan.FetchParentID(id)
 
 		n.FieldByParentID[fpid] = resolveFetchContextFieldByParentIDName(p, fpid)
-		n.ParentGetterMethod[fpid] = resolveFetchContextParentGetterMethodName(p, fpid)
 	}
 
 	n.FieldChildSeen = make([]string, len(p.FetchChildren))
@@ -58,6 +60,29 @@ func (n *fetchContextNaming) warmUp(p plan.Plan) {
 
 		n.EnqueueMethod[efid] = resolveFetchContextEnqueueMethodName(p, efid)
 	}
+
+	n.FieldSyntheticState = make([]string, len(p.SyntheticStateContainers))
+	for id := range p.SyntheticStateContainers {
+		sscid := plan.SyntheticStateContainerID(id)
+
+		n.FieldSyntheticState[sscid] = resolveFetchContextFieldSyntheticStateName(p, sscid)
+	}
+
+	n.ParentGetterMethod = make([]string, len(p.FetchParents))
+
+	for id := range p.ParentFetchGetters {
+		pfgid := plan.ParentFetchGetterID(id)
+
+		n.ParentGetterMethod[pfgid] = resolveFetchContextParentGetterMethodName(p, pfgid)
+	}
+
+	n.AddNestedMethod = make([]string, len(p.NestedEntityFetches))
+
+	for id := range p.NestedEntityFetches {
+		nefid := plan.NestedEntityFetchID(id)
+
+		n.AddNestedMethod[nefid] = resolveFetchContextAddNestedMethodName(p, nefid)
+	}
 }
 
 func resolveFetchContextFieldByParentIDName(p plan.Plan, fpid plan.FetchParentID) string {
@@ -77,8 +102,9 @@ func resolveFetchContextFieldByParentIDName(p plan.Plan, fpid plan.FetchParentID
 	return sb.String()
 }
 
-func resolveFetchContextParentGetterMethodName(p plan.Plan, fpid plan.FetchParentID) string {
-	fp := p.FetchParents[fpid]
+func resolveFetchContextParentGetterMethodName(p plan.Plan, pfgif plan.ParentFetchGetterID) string {
+	pfg := p.ParentFetchGetters[pfgif]
+	fp := p.FetchParents[pfg.FetchParent]
 
 	return "get" + sanitizeID(p.Model.Entities[fp.Entity].Name, sanitizeRawCapitalized)
 }
@@ -137,4 +163,16 @@ func resolveFetchContextEnqueueMethodName(p plan.Plan, efid plan.EntityFetchID) 
 	}
 
 	return sb.String()
+}
+
+func resolveFetchContextFieldSyntheticStateName(p plan.Plan, sscid plan.SyntheticStateContainerID) string {
+	ssc := p.SyntheticStateContainers[sscid]
+
+	return "synth" + sanitizeID(p.Model.Entities[ssc.Entity].Name, sanitizeRawCapitalized)
+}
+
+func resolveFetchContextAddNestedMethodName(p plan.Plan, nefid plan.NestedEntityFetchID) string {
+	nef := p.NestedEntityFetches[nefid]
+
+	return "addNested" + sanitizeID(p.Model.Entities[nef.Entity].Name, sanitizeRawCapitalized)
 }

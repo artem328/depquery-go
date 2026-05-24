@@ -31,12 +31,16 @@ func (r *Resolver) initEntities() {
 			Type:   t,
 		}
 		r.model.Entities = append(r.model.Entities, Entity{
-			Name: entityName,
-			Type: tid,
+			Name:      entityName,
+			Synthetic: e.Synthetic.V,
+			Type:      tid,
 		})
 
-		if t != nil {
-			r.model.Entities[eid].IDMember = r.findOrAddEntityIDMember(e, t)
+		if t != nil && !r.model.Entities[eid].Synthetic {
+			mt, mid := r.findOrAddEntityIDMember(e, t)
+
+			r.model.Entities[eid].IDMember = mid
+			r.model.Entities[eid].IDUnderlyingType = r.resolveUnderlyingTypeKind(mt)
 		}
 	}
 }
@@ -70,19 +74,19 @@ func (r *Resolver) addEntityType(e schema.Entity) (TypeID, types.Type) {
 	return tid, pt
 }
 
-func (r *Resolver) findOrAddEntityIDMember(e schema.Entity, t types.Type) MemberID {
+func (r *Resolver) findOrAddEntityIDMember(e schema.Entity, t types.Type) (types.Type, MemberID) {
 	entityName := e.Name.V
 
 	mid, mt := r.findOrCreateMember(entityName, t, e.ID)
 	if mt == nil {
-		return 0
+		return nil, 0
 	}
 
 	if !types.Comparable(mt) {
 		r.eerr(entityName, fmt.Sprintf("type %s is not suitable for ID as it's incomparable", mt.String()), e.Type.Definition)
 
-		return 0
+		return nil, 0
 	}
 
-	return mid
+	return mt, mid
 }

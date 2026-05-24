@@ -3,6 +3,40 @@ package plan
 import "github.com/artem328/depquery-go/internal/gen/semantic"
 
 func (p *Planner) initFetch() {
+	p.initSyntheticStateContainers()
+	p.initFetchParents()
+	p.initNestedEntityFetch()
+}
+
+func (p *Planner) initSyntheticStateContainers() {
+	p.syntheticContainerByEntity = make(map[semantic.EntityID]SyntheticStateContainerID)
+	p.plan.SyntheticStateContainers = make([]SyntheticStateContainer, 0, len(p.model.Entities))
+
+	var syntheticStateContainerID counter[SyntheticStateContainerID]
+
+	for id, e := range p.model.Entities {
+		if !e.Synthetic {
+			continue
+		}
+
+		eid := semantic.EntityID(id)
+
+		if p.referencedEntities[eid] == 0 && p.referencingEntities[eid] == 0 && len(p.nestedsByEntity[eid]) == 0 {
+			// TODO: warning
+			continue
+		}
+
+		sscid := syntheticStateContainerID.Next()
+		p.plan.SyntheticStateContainers = append(p.plan.SyntheticStateContainers, SyntheticStateContainer{
+			ID:          sscid,
+			Entity:      eid,
+			IDNamespace: p.idNamespace.Next(),
+		})
+		p.syntheticContainerByEntity[eid] = sscid
+	}
+}
+
+func (p *Planner) initFetchParents() {
 	p.fetchByEntity = make(map[semantic.EntityID]EntityFetchID)
 	p.reversedFetchByRelation = make(map[RelationID]EntityFetchID)
 	p.fetchParentByEntity = make(map[semantic.EntityID]FetchParentID)
@@ -22,10 +56,10 @@ func (p *Planner) initFetch() {
 		fetchChildID       counter[FetchChildID]
 	)
 
-	for id := range p.model.Entities {
+	for id, e := range p.model.Entities {
 		eid := semantic.EntityID(id)
 
-		isParent := p.referencingEntities[eid] > 0
+		isParent := p.referencingEntities[eid] > 0 || len(p.nestedsByEntity[eid]) > 0
 		isChild := p.referencedEntities[eid] > p.reverseReferencedEntities[eid]
 
 		if !isParent && !isChild {
@@ -47,10 +81,12 @@ func (p *Planner) initFetch() {
 
 			fcrid := fetchContextRootID.Next()
 			p.plan.FetchContextRoots = append(p.plan.FetchContextRoots, FetchContextRoot{
-				ID:             fcrid,
-				Entity:         eid,
-				FetchParent:    parentID,
-				StateContainer: p.containerByEntity[eid],
+				ID:                      fcrid,
+				Entity:                  eid,
+				Synthetic:               e.Synthetic,
+				FetchParent:             parentID,
+				StateContainer:          p.containerByEntity[eid],
+				SyntheticStateContainer: p.syntheticContainerByEntity[eid],
 			})
 			p.fetchContextRootByEntity[eid] = fcrid
 		}
@@ -141,18 +177,28 @@ func (p *Planner) initFetch() {
 		p.reversedFetchByRelation[rel.ID] = efid
 	}
 
+	p.parentFetchGetterByFetchParent = make(map[FetchParentID]ParentFetchGetterID)
 	p.plan.ReversedFetchParents = make([]ReversedFetchParent, 0, len(p.plan.FetchParents))
 	p.plan.ParentFetchGetters = make([]ParentFetchGetter, 0, len(p.plan.FetchParents))
+
+	var parentFetchGetterID counter[ParentFetchGetterID]
 
 	for _, fp := range p.plan.FetchParents {
 		if fp.Reversed {
 			continue
 		}
 
+		e := p.model.Entities[fp.Entity]
+		pfgid := parentFetchGetterID.Next()
+
 		p.plan.ParentFetchGetters = append(p.plan.ParentFetchGetters, ParentFetchGetter{
-			FetchParent:    fp.ID,
-			StateContainer: p.containerByEntity[fp.Entity],
+			ID:                      pfgid,
+			FetchParent:             fp.ID,
+			Synthetic:               e.Synthetic,
+			StateContainer:          p.containerByEntity[fp.Entity],
+			SyntheticStateContainer: p.syntheticContainerByEntity[fp.Entity],
 		})
+		p.parentFetchGetterByFetchParent[fp.ID] = pfgid
 
 		reversedBy := reversedFetchParents[fp.Entity]
 		if len(reversedBy) == 0 {
@@ -172,5 +218,38 @@ func (p *Planner) initFetch() {
 			StateContainer:       p.containerByEntity[fp.Entity],
 			ReversedFetchParents: reversed,
 		})
+	}
+}
+
+func (p *Planner) initNestedEntityFetch() {
+	p.nestedEntityFetchByNested = make(map[NestedID]NestedEntityFetchID)
+	nestedEntityFetchByEntity := make(map[semantic.EntityID]NestedEntityFetchID)
+
+	var nestedEntityFetchID counter[NestedEntityFetchID]
+
+	for _, n := range p.plan.Nesteds {
+		e := p.model.Entities[n.To]
+
+		if p.referencingEntities[n.To] == 0 && len(p.nestedsByEntity[n.To]) == 0 {
+			continue
+		}
+
+		if nefid, ok := nestedEntityFetchByEntity[n.To]; ok {
+			p.nestedEntityFetchByNested[n.ID] = nefid
+			continue
+		}
+
+		nefid := nestedEntityFetchID.Next()
+
+		p.plan.NestedEntityFetches = append(p.plan.NestedEntityFetches, NestedEntityFetch{
+			ID:                        nefid,
+			Entity:                    n.To,
+			Parent:                    p.fetchParentByEntity[n.To],
+			Synthetic:                 e.Synthetic,
+			StateContainer:            p.containerByEntity[n.To],
+			SyntheticStateContainerID: p.syntheticContainerByEntity[n.To],
+		})
+		p.nestedEntityFetchByNested[n.ID] = nefid
+		nestedEntityFetchByEntity[n.To] = nefid
 	}
 }

@@ -457,3 +457,66 @@ func (r *Resolver) hashType(t Type) [16]byte {
 
 	return md5.Sum(seed)
 }
+
+func (r *Resolver) resolveUnderlyingTypeKind(t types.Type) UnderlyingTypeKind {
+	for {
+		if t == nil {
+			return 0
+		}
+
+		switch tt := t.(type) {
+		case *types.Basic:
+			switch tt.Kind() {
+			case types.Int:
+				return UnderlyingTypeInt
+			case types.Int8:
+				return UnderlyingTypeInt8
+			case types.Int16:
+				return UnderlyingTypeInt16
+			case types.Int32:
+				return UnderlyingTypeInt32
+			case types.Int64:
+				return UnderlyingTypeInt64
+			case types.Uint:
+				return UnderlyingTypeUint
+			case types.Uint8:
+				return UnderlyingTypeUint8
+			case types.Uint16:
+				return UnderlyingTypeUint16
+			case types.Uint32:
+				return UnderlyingTypeUint32
+			case types.Uint64:
+				return UnderlyingTypeUint64
+			case types.Float32:
+				return UnderlyingTypeFloat32
+			case types.Float64:
+				return UnderlyingTypeFloat64
+			case types.String:
+				return UnderlyingTypeString
+			case types.UntypedInt:
+				return UnderlyingTypeInt
+			case types.UntypedRune:
+				return UnderlyingTypeInt32
+			case types.UntypedFloat:
+				return UnderlyingTypeFloat32
+			case types.UntypedString:
+				return UnderlyingTypeString
+			default:
+				return 0
+			}
+		case *types.Array:
+			b, ok := tt.Elem().(*types.Basic)
+			if !ok || b.Kind() != types.Byte {
+				return 0
+			}
+
+			return UnderlyingTypeByteArray
+		default:
+			ut := t.Underlying()
+			if t == ut {
+				return 0
+			}
+			t = ut
+		}
+	}
+}

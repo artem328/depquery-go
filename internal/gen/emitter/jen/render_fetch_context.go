@@ -13,6 +13,7 @@ func (r *Renderer) renderFetchContextImplementation() {
 	rcv := Id("ctx")
 
 	r.renderFetchContextEnqueueMethods(rcv)
+	r.renderFetchContextAddNestedMethods(rcv)
 	r.renderFetchContextStateOverrides(rcv)
 	r.renderFetchContextParentGetterMethods(rcv)
 	r.renderFetchContextFlushMethod(rcv)
@@ -36,6 +37,14 @@ func (r *Renderer) generateFetchContextStructFields() []Code {
 
 		for _, fp := range r.plan.FetchParents {
 			fields = append(fields, Id(r.naming.FetchContext.FieldByParentID[fp.ID]).Add(r.generateFetchContextParentFieldType(fp)))
+		}
+	}
+
+	if len(r.plan.SyntheticStateContainers) > 0 {
+		fields = append(fields, Empty())
+
+		for _, ssc := range r.plan.SyntheticStateContainers {
+			fields = append(fields, Id(r.naming.FetchContext.FieldSyntheticState[ssc.ID]).Add(r.generateFetchContextSyntheticStateFieldType(ssc)))
 		}
 	}
 
@@ -63,14 +72,25 @@ func (r *Renderer) generateFetchContextParentFieldType(fp plan.FetchParent) Code
 }
 
 func (r *Renderer) generateFetchContextParentLevelSetType(fp plan.FetchParent) Code {
+	var idType Code
+
 	e := r.plan.Model.Entities[fp.Entity]
-	if fp.Reversed {
-		e = r.plan.Model.Entities[fp.ReversedByEntity]
+	if e.Synthetic {
+		idType = Uint64()
+	} else if fp.Reversed {
+		re := r.plan.Model.Entities[fp.ReversedByEntity]
+		idType = r.types[r.plan.Model.Members[re.IDMember].Type]
+	} else {
+		idType = r.types[r.plan.Model.Members[e.IDMember].Type]
 	}
 
-	im := r.plan.Model.Members[e.IDMember]
+	return Map(idType).Struct()
+}
 
-	return Map(r.types[im.Type]).Struct()
+func (r *Renderer) generateFetchContextSyntheticStateFieldType(ssc plan.SyntheticStateContainer) Code {
+	e := r.plan.Model.Entities[ssc.Entity]
+
+	return Map(Uint64()).Add(r.types[e.Type])
 }
 
 func (r *Renderer) generateFetchContextSeenFieldType(fc plan.FetchChild) Code {
@@ -102,6 +122,10 @@ func (r *Renderer) renderFetchContextConstructor() {
 
 	for _, fp := range r.plan.FetchParents {
 		inits = append(inits, Id(r.naming.FetchContext.FieldByParentID[fp.ID]).Op(":").Make(r.generateFetchContextParentFieldType(fp)))
+	}
+
+	for _, ssc := range r.plan.SyntheticStateContainers {
+		inits = append(inits, Id(r.naming.FetchContext.FieldSyntheticState[ssc.ID]).Op(":").Make(r.generateFetchContextSyntheticStateFieldType(ssc)))
 	}
 
 	for _, fc := range r.plan.FetchChildren {
@@ -144,34 +168,74 @@ func (r *Renderer) renderFetchContextInstanceConstructors() {
 }
 
 func (r *Renderer) renderFetchContextInstanceConstructor(fcr plan.FetchContextRoot) {
-	e := r.plan.Model.Entities[fcr.Entity]
-
 	iter := Id("i")
 	fetchContext := Id("ctx")
 	zeroLevel := Id("zero")
-	entity := Id("x")
+
+	var statements []Code
+
+	statements = append(statements,
+		Add(fetchContext).Op(":=").Add(r.generateFetchContextConstructorCall()),
+		Empty(),
+	)
+	statements = append(statements, r.generateFetchContextInstanceConstructorZeroLevel(fcr, zeroLevel, iter, fetchContext)...)
+	statements = append(statements,
+		Empty(),
+		Add(fetchContext).Dot(r.naming.FetchContext.FieldByParentID[fcr.FetchParent]).Index(Lit(0)).Op("=").Add(zeroLevel),
+		Empty(),
+		Return(fetchContext),
+	)
 
 	r.f.Add(block(
-		Func().Add(r.generateFetchContextConstructorForEntitySignature(fcr, iter)).Block(
-			Add(fetchContext).Op(":=").Add(r.generateFetchContextConstructorCall()),
-
-			Empty(),
-
-			Add(zeroLevel).Op(":=").Make(r.generateFetchContextParentLevelSetType(r.plan.FetchParents[fcr.FetchParent])),
-			For(Add(entity).Op(":=").Range().Add(iter)).Block(
-				Add(zeroLevel).Index(r.members.Member(entity, e.IDMember)).Op("=").Struct().Values(),
-				Add(fetchContext).Dot(r.naming.State.StateContainerField[fcr.StateContainer]).Index(r.members.Member(entity, e.IDMember)).Op("=").Add(libFetched).Call(entity),
-			),
-
-			Empty(),
-
-			Add(fetchContext).Dot(r.naming.FetchContext.FieldByParentID[fcr.FetchParent]).Index(Lit(0)).Op("=").Add(zeroLevel),
-
-			Empty(),
-
-			Return(fetchContext),
-		),
+		Func().Add(r.generateFetchContextConstructorForEntitySignature(fcr, iter)).Block(statements...),
 	))
+}
+
+func (r *Renderer) generateFetchContextInstanceConstructorZeroLevel(fcr plan.FetchContextRoot, zeroLevel, iter, fetchContext Code) []Code {
+	e := r.plan.Model.Entities[fcr.Entity]
+
+	entity := Id("x")
+	entityID := Id("xid")
+	counter := Id("_sid")
+
+	var statements []Code
+
+	var (
+		entityIDDef     Code
+		entityIDPostDef Code
+		stateEntity     Code
+		stateField      string
+	)
+	if fcr.Synthetic {
+		ssc := r.plan.SyntheticStateContainers[fcr.SyntheticStateContainer]
+
+		statements = append(statements,
+			Const().Id(r.naming.FetchContext.SyntheticNamespaceConst).Op("=").Lit(ssc.IDNamespace),
+			Empty(),
+			Var().Add(counter).Int(),
+		)
+		entityIDDef = Add(libSyntheticID).Call(Id(r.naming.FetchContext.SyntheticNamespaceConst), Add(libIBytes).Call(counter))
+		entityIDPostDef = Add(counter).Op("++")
+		stateField = r.naming.FetchContext.FieldSyntheticState[fcr.SyntheticStateContainer]
+		stateEntity = entity
+	} else {
+		entityIDDef = r.members.Member(entity, e.IDMember)
+		entityIDPostDef = Null()
+		stateField = r.naming.State.StateContainerField[fcr.StateContainer]
+		stateEntity = Add(libFetched).Call(entity)
+	}
+
+	statements = append(statements,
+		Add(zeroLevel).Op(":=").Make(r.generateFetchContextParentLevelSetType(r.plan.FetchParents[fcr.FetchParent])),
+		For(Add(entity).Op(":=").Range().Add(iter)).Block(
+			Add(entityID).Op(":=").Add(entityIDDef),
+			Add(entityIDPostDef),
+			Add(zeroLevel).Index(entityID).Op("=").Struct().Values(),
+			Add(fetchContext).Dot(stateField).Index(entityID).Op("=").Add(stateEntity),
+		),
+	)
+
+	return statements
 }
 
 func (r *Renderer) generateFetchContextMethodBase(rcv Code) Code {
@@ -208,15 +272,7 @@ func (r *Renderer) generateFetchContextEnqueueMethodBody(ef plan.EntityFetch, rc
 
 	if ef.IsParent {
 		p := r.plan.FetchParents[ef.Parent]
-		byParentIDSet := Add(rcv).Dot(r.naming.FetchContext.FieldByParentID[ef.Parent]).Index(relationIDArg)
-
-		statements = append(statements,
-			If(List(swallow, ok).Op(":=").Add(byParentIDSet), Op("!").Add(ok)).Block(
-				Add(byParentIDSet).Op("=").Add(Make(r.generateFetchContextParentLevelSetType(p))),
-			),
-			Empty(),
-			Add(byParentIDSet).Index(idArg).Op("=").Struct().Values(),
-		)
+		statements = append(statements, r.generateFetchContextParentLevelSetInit(p, rcv, relationIDArg, idArg)...)
 	}
 
 	if len(statements) > 0 {
@@ -243,6 +299,105 @@ func (r *Renderer) generateFetchContextEnqueueMethodBody(ef plan.EntityFetch, rc
 	)
 
 	return statements
+}
+
+func (r *Renderer) generateFetchContextParentLevelSetInit(fp plan.FetchParent, rcv, parentIDArg, idArg Code) []Code {
+	byParentIDSet := Add(rcv).Dot(r.naming.FetchContext.FieldByParentID[fp.ID]).Index(parentIDArg)
+
+	ok := Id("ok")
+	swallow := Id("_")
+
+	return []Code{
+		If(List(swallow, ok).Op(":=").Add(byParentIDSet), Op("!").Add(ok)).Block(
+			Add(byParentIDSet).Op("=").Add(Make(r.generateFetchContextParentLevelSetType(fp))),
+		),
+		Empty(),
+		Add(byParentIDSet).Index(idArg).Op("=").Struct().Values(),
+	}
+}
+
+func (r *Renderer) renderFetchContextAddNestedMethods(rcv Code) {
+	for _, nef := range r.plan.NestedEntityFetches {
+		if nef.Synthetic {
+			r.renderFetchContextAddNestedSyntheticMethod(nef, rcv)
+		} else {
+			r.renderFetchContextAddNestedMethod(nef, rcv)
+		}
+	}
+}
+
+func (r *Renderer) renderFetchContextAddNestedSyntheticMethod(nef plan.NestedEntityFetch, rcv Code) {
+	nested := Id("n")
+	parentLevelID := Id("pid")
+	id := Id("id")
+	swallow := Id("_")
+	ok := Id("ok")
+
+	var body []Code
+
+	body = append(body, r.generateFetchContextParentLevelSetInit(r.plan.FetchParents[nef.Parent], rcv, parentLevelID, id)...)
+
+	nestedLocation := Add(rcv).Dot(r.naming.FetchContext.FieldSyntheticState[nef.SyntheticStateContainerID]).Index(id)
+	body = append(body,
+		Empty(),
+		If(List(swallow, ok).Op(":=").Add(nestedLocation), Op("!").Add(ok)).Block(
+			Add(nestedLocation).Op("=").Add(nested),
+		),
+	)
+
+	r.f.Add(block(
+		Add(r.generateFetchContextMethodBase(rcv), r.generateFetchContextAddNestedSyntheticMethodSignature(nef, nested, parentLevelID, id)).Block(body...),
+	))
+}
+
+func (r *Renderer) generateFetchContextAddNestedSyntheticMethodSignature(nef plan.NestedEntityFetch, nestedParam, entityLevelIDParam, idParam Code) Code {
+	e := r.plan.Model.Entities[nef.Entity]
+
+	return Id(r.naming.FetchContext.AddNestedMethod[nef.ID]).Params(Add(nestedParam, r.types[e.Type]), Add(entityLevelIDParam, libID), Add(idParam, Uint64())).Params()
+}
+
+func (r *Renderer) generateFetchContextAddNestedSyntheticMethodCall(nefid plan.NestedEntityFetchID, rcv, nestedArg, entityLevelIDArg, idArg Code) Code {
+	return Add(rcv).Dot(r.naming.FetchContext.AddNestedMethod[nefid]).Call(nestedArg, entityLevelIDArg, idArg)
+}
+
+func (r *Renderer) renderFetchContextAddNestedMethod(nef plan.NestedEntityFetch, rcv Code) {
+	e := r.plan.Model.Entities[nef.Entity]
+
+	id := Id("id")
+	nested := Id("n")
+	entityLevelID := Id("eid")
+	maybeFetched := Id("mf")
+	ok := Id("ok")
+
+	var body []Code
+
+	body = append(body,
+		Add(id).Op(":=").Add(r.members.Member(nested, e.IDMember)),
+		Empty(),
+	)
+	body = append(body, r.generateFetchContextParentLevelSetInit(r.plan.FetchParents[nef.Parent], rcv, entityLevelID, id)...)
+
+	nestedLocation := Add(rcv).Dot(r.naming.State.StateContainerField[nef.StateContainer]).Index(id)
+	body = append(body,
+		Empty(),
+		If(List(maybeFetched, ok).Op(":=").Add(nestedLocation), Op("!").Add(ok).Op("||").Op("!").Add(maybeFetched).Dot("Fetched").Call()).Block(
+			Add(nestedLocation).Op("=").Add(libFetched).Call(nested),
+		),
+	)
+
+	r.f.Add(block(
+		Add(r.generateFetchContextMethodBase(rcv), r.generateFetchContextAddNestedMethodSignature(nef, nested, entityLevelID)).Block(body...),
+	))
+}
+
+func (r *Renderer) generateFetchContextAddNestedMethodSignature(nef plan.NestedEntityFetch, nestedParam, entityLevelIDParam Code) Code {
+	e := r.plan.Model.Entities[nef.Entity]
+
+	return Id(r.naming.FetchContext.AddNestedMethod[nef.ID]).Params(Add(nestedParam, r.types[e.Type]), Add(entityLevelIDParam, libID)).Params()
+}
+
+func (r *Renderer) generateFetchContextAddNestedMethodCall(nefid plan.NestedEntityFetchID, rcv Code, nestedArg, entityLevelIDArg Code) Code {
+	return Add(rcv).Dot(r.naming.FetchContext.AddNestedMethod[nefid]).Call(nestedArg, entityLevelIDArg)
 }
 
 func (r *Renderer) renderFetchContextEnqueueMethod(ef plan.EntityFetch, rcv Code) {
@@ -319,10 +474,18 @@ func (r *Renderer) renderFetchContextParentGetterMethod(pfg plan.ParentFetchGett
 }
 
 func (r *Renderer) generateFetchContextParentGetterMethodSignature(pfg plan.ParentFetchGetter, levelIDArg Code) Code {
+	return Id(r.naming.FetchContext.ParentGetterMethod[pfg.ID]).Params(Add(levelIDArg, libID)).Params(r.generateFetchContextParentGetterReturnParam(pfg))
+}
+
+func (r *Renderer) generateFetchContextParentGetterReturnParam(pfg plan.ParentFetchGetter) Code {
 	fp := r.plan.FetchParents[pfg.FetchParent]
 	e := r.plan.Model.Entities[fp.Entity]
 
-	return Id(r.naming.FetchContext.ParentGetterMethod[fp.ID]).Params(Add(levelIDArg, libID)).Params(Add(iterSeq).Types(r.types[e.Type]))
+	if pfg.Synthetic {
+		return Add(iterSeq2).Types(Uint64(), r.types[e.Type])
+	}
+
+	return Add(iterSeq).Types(r.types[e.Type])
 }
 
 func (r *Renderer) generateFetchContextParentGetterMethodBody(pfg plan.ParentFetchGetter, rcv, levelIDArg Code) []Code {
@@ -333,23 +496,41 @@ func (r *Renderer) generateFetchContextParentGetterMethodBody(pfg plan.ParentFet
 	id := Id("id")
 	entity := Id("e")
 
+	var (
+		yieldParams      []Code
+		contextFieldName string
+		yieldBlock       Code
+	)
+
+	if pfg.Synthetic {
+		yieldParams = []Code{Uint64(), r.types[e.Type]}
+		contextFieldName = r.naming.FetchContext.FieldSyntheticState[pfg.SyntheticStateContainer]
+		yieldBlock = If(Op("!").Add(yield).Call(id, entity)).Block(
+			Return(),
+		)
+	} else {
+		yieldParams = []Code{r.types[e.Type]}
+		contextFieldName = r.naming.State.StateContainerField[pfg.StateContainer]
+		yieldBlock = If(Add(entity).Dot("Fetched").Call().Op("&&").Op("!").Add(yield).Call(Add(entity).Dot("Value").Call())).Block(
+			Return(),
+		)
+	}
+
 	return []Code{
 		Return(
-			Func().Params(Add(yield, Func().Params(r.types[e.Type]).Params(Bool()))).Block(
+			Func().Params(Add(yield, Func().Params(yieldParams...).Params(Bool()))).Block(
 				For(Add(id).Op(":=").Range().Add(rcv).Dot(r.naming.FetchContext.FieldByParentID[fp.ID]).Index(levelIDArg)).Block(
-					Add(entity).Op(":=").Add(rcv).Dot(r.naming.State.StateContainerField[pfg.StateContainer]).Index(id),
+					Add(entity).Op(":=").Add(rcv).Dot(contextFieldName).Index(id),
 					Empty(),
-					If(Add(entity).Dot("Fetched").Call().Op("&&").Op("!").Add(yield).Call(Add(entity).Dot("Value").Call())).Block(
-						Return(),
-					),
+					yieldBlock,
 				),
 			),
 		),
 	}
 }
 
-func (r *Renderer) generateFetchContextParentGetterMethodCall(fpid plan.FetchParentID, rcv, parentIDArg Code) Code {
-	return Add(rcv).Dot(r.naming.FetchContext.ParentGetterMethod[fpid]).Call(parentIDArg)
+func (r *Renderer) generateFetchContextParentGetterMethodCall(pfgid plan.ParentFetchGetterID, rcv, parentIDArg Code) Code {
+	return Add(rcv).Dot(r.naming.FetchContext.ParentGetterMethod[pfgid]).Call(parentIDArg)
 }
 
 func (r *Renderer) renderFetchContextFlushMethod(rcv Code) {
