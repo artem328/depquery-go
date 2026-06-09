@@ -18,22 +18,20 @@ func (r *Renderer) generateCandidateCandidateMethodSignature() Code {
 	return Id(r.naming.Candidate.CandidateMethod).Params().Params(libCandidate)
 }
 
-func (r *Renderer) generateCandidateRelationCandidateMethodBody(rcv, builderRcv Code) []Code {
+func (r *Renderer) generateCandidateRelationCandidateMethodBody(builderRcv Code) []Code {
 	return []Code{
 		Return(Add(libCandidate).Values(
 			Id("ID").Op(":").Add(builderRcv).Dot(r.naming.Builder.FieldID),
-			Id("SubID").Op(":").Add(rcv).Dot(r.naming.Candidate.FieldSubID),
 			Id("ParentID").Op(":").Add(builderRcv).Dot(r.naming.Builder.FieldParentID),
 			Id("HasChildren").Op(":").Add(builderRcv).Dot(r.naming.Builder.FieldRelations).Op("!=").Lit(0),
 		)),
 	}
 }
 
-func (r *Renderer) generateCandidateNestedCandidateMethodBody(rcv, builderRcv Code) []Code {
+func (r *Renderer) generateCandidateNestedCandidateMethodBody(builderRcv Code) []Code {
 	return []Code{
 		Return(Add(libCandidate).Values(
-			Id("ID").Op(":").Add(builderRcv).Dot(r.naming.Builder.FieldID),
-			Id("SubID").Op(":").Add(rcv).Dot(r.naming.Candidate.FieldSubID),
+			Id("ID").Op(":").Add(builderRcv).Dot(r.naming.Builder.FieldNestedID),
 			Id("ParentID").Op(":").Add(builderRcv).Dot(r.naming.Builder.FieldParentID),
 			Id("HasChildren").Op(":").Add(builderRcv).Dot(r.naming.Builder.FieldNested).Op("!=").Lit(0),
 			Id("Nested").Op(":").Add(True()),
@@ -64,7 +62,7 @@ func (r *Renderer) generateCandidateNestedResolverMethodBody(nrid plan.NestedRes
 	return []Code{
 		Return(r.generateResolverNestedConstructorCall(
 			nrid,
-			Add(rcv).Dot(r.naming.Builder.FieldID),
+			Add(rcv).Dot(r.naming.Builder.FieldNestedID),
 			Add(rcv).Dot(r.naming.Builder.FieldParentID),
 			Add(rcv).Dot(r.naming.Builder.FieldNested),
 		)),

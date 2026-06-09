@@ -8,14 +8,12 @@ type candidateNaming struct {
 	ResolverMethod  string
 	RelationStruct  []string
 	NestedStruct    []string
-	FieldSubID      string
 }
 
 func (n *candidateNaming) warmUp(p plan.Plan) {
 	n.Interface = "candidate"
 	n.CandidateMethod = "Candidate"
 	n.ResolverMethod = "Resolver"
-	n.FieldSubID = "subID"
 
 	n.RelationStruct = make([]string, len(p.Builders))
 	n.NestedStruct = make([]string, len(p.Builders))

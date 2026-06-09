@@ -9,6 +9,7 @@ import (
 type builderNaming struct {
 	FieldContext   string
 	FieldID        string
+	FieldNestedID  string
 	FieldParentID  string
 	FieldRelations string
 	FieldNested    string
@@ -23,6 +24,7 @@ type builderNaming struct {
 func (n *builderNaming) warmUp(p plan.Plan) {
 	n.FieldContext = "_ctx"
 	n.FieldID = "_id"
+	n.FieldNestedID = "_nestedID"
 	n.FieldParentID = "_parentID"
 	n.FieldRelations = "_relations"
 	n.FieldNested = "_nested"

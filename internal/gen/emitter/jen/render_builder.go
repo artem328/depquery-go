@@ -122,8 +122,15 @@ func (r *Renderer) generateBuilderBaseFieldsDefinition(b plan.Builder) []Code {
 		fields = append(fields,
 			Id(r.naming.Builder.FieldContext).Op("*").Id(r.naming.BuildContext.Type),
 			Id(r.naming.Builder.FieldParentID).Add(libID),
-			Id(r.naming.Builder.FieldID).Add(libID),
 		)
+
+		if bb.IsRelationBuilder {
+			fields = append(fields, Id(r.naming.Builder.FieldID).Add(libID))
+		}
+
+		if bb.IsNestedBuilder {
+			fields = append(fields, Id(r.naming.Builder.FieldNestedID).Add(libID))
+		}
 
 		if bb.IsRelationBuilder {
 			fields = append(fields, Id(r.naming.Builder.FieldRelations).Uint64())
@@ -222,8 +229,15 @@ func (r *Renderer) generateRootBuilderConstructorBody(b plan.RootBuilder, ctxArg
 	fields = append(fields,
 		Id(r.naming.Builder.FieldContext).Op(":").Add(ctxArg),
 		Id(r.naming.Builder.FieldParentID).Op(":").Add(parentIdArg),
-		Id(r.naming.Builder.FieldID).Op(":").Add(r.generateBuildContextNextIDMethodCall(ctxArg)),
 	)
+
+	if b.IsRelationBuilder {
+		fields = append(fields, Id(r.naming.Builder.FieldID).Op(":").Add(r.generateBuildContextNextIDMethodCall(ctxArg)))
+	}
+
+	if b.IsNestedBuilder {
+		fields = append(fields, Id(r.naming.Builder.FieldNestedID).Op(":").Add(r.generateBuildContextNextIDMethodCall(ctxArg)))
+	}
 
 	builder := Op("&").Id(r.naming.Builder.Struct[b.GetID()]).Add(valuesMultiline(fields...))
 
@@ -233,13 +247,11 @@ func (r *Renderer) generateRootBuilderConstructorBody(b plan.RootBuilder, ctxArg
 
 	body = append(body, Add(builderVar).Op(":=").Add(builder))
 	body = append(body, Empty())
-	var subID uint
 	if b.IsRelationBuilder {
-		body = append(body, r.generateBuildContextAddCandidateMethodCall(ctxArg, Add(builderVar).Dot(r.naming.Builder.FieldID), Lit(subID), Id(r.naming.Candidate.RelationStruct[b.ID]).Values(builderVar, Lit(subID))))
-		subID++
+		body = append(body, r.generateBuildContextAddCandidateMethodCall(ctxArg, Add(builderVar).Dot(r.naming.Builder.FieldID), Id(r.naming.Candidate.RelationStruct[b.ID]).Values(builderVar)))
 	}
 	if b.IsNestedBuilder {
-		body = append(body, r.generateBuildContextAddCandidateMethodCall(ctxArg, Add(builderVar).Dot(r.naming.Builder.FieldID), Lit(subID), Id(r.naming.Candidate.NestedStruct[b.ID]).Values(builderVar, Lit(subID))))
+		body = append(body, r.generateBuildContextAddCandidateMethodCall(ctxArg, Add(builderVar).Dot(r.naming.Builder.FieldNestedID), Id(r.naming.Candidate.NestedStruct[b.ID]).Values(builderVar)))
 	}
 	body = append(body, Empty(), Return(builderVar))
 
@@ -299,7 +311,7 @@ func (r *Renderer) renderBuilderRelationsCandidateImplementation(b plan.RootBuil
 
 	r.f.Add(block(
 		Add(r.generateBuilderCandidateMethodBase(r.naming.Candidate.RelationStruct[b.ID], rcv), r.generateCandidateCandidateMethodSignature()).Block(
-			r.generateCandidateRelationCandidateMethodBody(rcv, Add(rcv).Dot(builderField))...,
+			r.generateCandidateRelationCandidateMethodBody(Add(rcv).Dot(builderField))...,
 		),
 	))
 
@@ -321,7 +333,7 @@ func (r *Renderer) renderBuilderNestedCandidateImplementation(b plan.RootBuilder
 
 	r.f.Add(block(
 		Add(r.generateBuilderCandidateMethodBase(r.naming.Candidate.NestedStruct[b.ID], rcv), r.generateCandidateCandidateMethodSignature()).Block(
-			r.generateCandidateNestedCandidateMethodBody(rcv, Add(rcv).Dot(builderField))...,
+			r.generateCandidateNestedCandidateMethodBody(Add(rcv).Dot(builderField))...,
 		),
 	))
 
@@ -335,14 +347,12 @@ func (r *Renderer) renderBuilderNestedCandidateImplementation(b plan.RootBuilder
 func (r *Renderer) generateBuilderRelationsCandidateStruct(b plan.RootBuilder, builderField string) Code {
 	return Type().Id(r.naming.Candidate.RelationStruct[b.ID]).Struct(
 		Id(builderField).Op("*").Id(r.naming.Builder.Struct[b.ID]),
-		Id(r.naming.Candidate.FieldSubID).Uint(),
 	)
 }
 
 func (r *Renderer) generateBuilderNestedCandidateStruct(b plan.RootBuilder, builderField string) Code {
 	return Type().Id(r.naming.Candidate.NestedStruct[b.ID]).Struct(
 		Id(builderField).Op("*").Id(r.naming.Builder.Struct[b.ID]),
-		Id(r.naming.Candidate.FieldSubID).Uint(),
 	)
 }
 
@@ -426,7 +436,7 @@ func (r *Renderer) generateBuilderNestedMethodBody(m plan.NestedBuilderMethod, r
 		Add(rcv).Dot(r.naming.Builder.FieldNested).Op("|=").Id(r.naming.Nested.ConstantName[m.Nested]),
 		Empty(),
 		If(Add(rcv).Dot(r.naming.Nested.ChildBuilder[m.Nested]).Op("==").Nil()).Block(
-			Add(rcv).Dot(r.naming.Nested.ChildBuilder[m.Nested]).Op("=").Add(r.generateRootBuilderConstructorCall(m.ChildBuilder, Add(rcv).Dot(r.naming.Builder.FieldContext), Add(rcv).Dot(r.naming.Builder.FieldID))),
+			Add(rcv).Dot(r.naming.Nested.ChildBuilder[m.Nested]).Op("=").Add(r.generateRootBuilderConstructorCall(m.ChildBuilder, Add(rcv).Dot(r.naming.Builder.FieldContext), Add(rcv).Dot(r.naming.Builder.FieldNestedID))),
 		),
 		Empty(),
 		If(Add(childRcv).Op("!=").Nil()).Block(
